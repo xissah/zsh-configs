@@ -21,7 +21,7 @@
 
 ```bash
 # 1. Клонируем репозиторий
-git clone <repo-url> ~/zsh_to_git
+git clone https://github.com/xissah/zsh-configs.git
 
 # 2. Запускаем установку
 cd ~/zsh_to_git
