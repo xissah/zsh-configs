@@ -22,48 +22,86 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
+APT_UPDATED=0
+
+install_packages() {
+    local packages=("$@")
+
+    if command -v apt-get &>/dev/null; then
+        if [ "$APT_UPDATED" -eq 0 ]; then
+            sudo apt-get update
+            APT_UPDATED=1
+        fi
+        sudo apt-get install -y "${packages[@]}"
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y "${packages[@]}"
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y "${packages[@]}"
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm "${packages[@]}"
+    elif command -v brew &>/dev/null; then
+        brew install "${packages[@]}"
+    else
+        error "Не удалось определить пакетный менеджер. Установите пакеты вручную: ${packages[*]}"
+    fi
+}
+
+ensure_command() {
+    local command_name="$1"
+    local package_name="$2"
+
+    if command -v "$command_name" &>/dev/null; then
+        return
+    fi
+
+    warn "$command_name не найден. Попытка установки..."
+    install_packages "$package_name"
+    command -v "$command_name" &>/dev/null || error "Не удалось установить $command_name. Установите пакет $package_name вручную."
+    info "$command_name установлен."
+}
+
 # --------------------------------------------------------------------------- #
 # 1. Проверка наличия zsh
 # --------------------------------------------------------------------------- #
-if ! command -v zsh &>/dev/null; then
-    warn "zsh не найден. Попытка установки..."
-    if command -v apt-get &>/dev/null; then
-        sudo apt-get update && sudo apt-get install -y zsh
-    elif command -v dnf &>/dev/null; then
-        sudo dnf install -y zsh
-    elif command -v yum &>/dev/null; then
-        sudo yum install -y zsh
-    elif command -v pacman &>/dev/null; then
-        sudo pacman -S --noconfirm zsh
-    elif command -v brew &>/dev/null; then
-        brew install zsh
-    else
-        error "Не удалось определить пакетный менеджер. Установите zsh вручную."
-    fi
-    info "zsh установлен."
-fi
+ensure_command zsh zsh
 
 # --------------------------------------------------------------------------- #
 # 2. Проверка наличия git
 # --------------------------------------------------------------------------- #
-if ! command -v git &>/dev/null; then
-    error "git не установлен. Установите git и повторите попытку."
-fi
+ensure_command git git
 
 # --------------------------------------------------------------------------- #
-# 3. Установка Oh My Zsh (если ещё не установлен)
+# 3. Проверка наличия curl
 # --------------------------------------------------------------------------- #
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
+ensure_command curl curl
+
+# --------------------------------------------------------------------------- #
+# 4. Установка Oh My Zsh (если ещё не установлен)
+# --------------------------------------------------------------------------- #
+OMZ_DIR="$HOME/.oh-my-zsh"
+OMZ_SH="$OMZ_DIR/oh-my-zsh.sh"
+
+if [ ! -f "$OMZ_SH" ]; then
+    if [ -d "$OMZ_DIR" ]; then
+        backup_dir="${OMZ_DIR}.backup.$(date +%Y%m%d%H%M%S)"
+        warn "Каталог $OMZ_DIR существует, но $OMZ_SH не найден."
+        warn "Перемещаю неполную установку в: $backup_dir"
+        mv "$OMZ_DIR" "$backup_dir"
+    fi
+
     info "Установка Oh My Zsh..."
-    RUNZSH=no KEEP_ZSHRC=yes \
-        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    omz_installer="$(mktemp)"
+    curl -fsSL -o "$omz_installer" https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+    RUNZSH=no KEEP_ZSHRC=yes CHSH=no sh "$omz_installer" --unattended
+    rm -f "$omz_installer"
+    [ -f "$OMZ_SH" ] || error "Oh My Zsh не установлен: файл $OMZ_SH не найден."
     info "Oh My Zsh установлен."
 else
     info "Oh My Zsh уже установлен — пропускаем."
 fi
 
 # --------------------------------------------------------------------------- #
-# 4. Установка темы Powerlevel10k
+# 5. Установка темы Powerlevel10k
 # --------------------------------------------------------------------------- #
 P10K_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
 if [ ! -d "$P10K_DIR" ]; then
@@ -76,7 +114,7 @@ else
 fi
 
 # --------------------------------------------------------------------------- #
-# 5. Установка плагинов
+# 6. Установка плагинов
 # --------------------------------------------------------------------------- #
 ZSH_CUSTOM_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 
@@ -103,7 +141,7 @@ else
 fi
 
 # --------------------------------------------------------------------------- #
-# 6. Создание символических ссылок (с бэкапом старых файлов)
+# 7. Создание символических ссылок (с бэкапом старых файлов)
 # --------------------------------------------------------------------------- #
 backup_and_link() {
     local src="$1"
@@ -125,7 +163,7 @@ backup_and_link "$SCRIPT_DIR/zshrc"    "$HOME/.zshrc"
 backup_and_link "$SCRIPT_DIR/p10k.zsh" "$HOME/.p10k.zsh"
 
 # --------------------------------------------------------------------------- #
-# 7. Установка zsh как оболочки по умолчанию (опционально)
+# 8. Установка zsh как оболочки по умолчанию (опционально)
 # --------------------------------------------------------------------------- #
 CURRENT_SHELL="$(basename "$SHELL")"
 if [ "$CURRENT_SHELL" != "zsh" ]; then
